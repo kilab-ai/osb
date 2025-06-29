@@ -1,0 +1,2505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    Defines the document's metadata, including character encoding, viewport settings, favicon, title, and external library imports.
+    - The meta tags ensure proper text encoding (UTF-8) and responsive viewport scaling.
+    - The favicon is an SVG emoji, displayed in the browser tab.
+    - The title "OSB" is shown in the browser tab.
+    - Imports jsPDF and html2canvas libraries for PDF generation of the chat conversation, used in the save conversation feature in the toolbar.
+    - Connected to: The save button functionality in the JavaScript section.
+  -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50%' y='50%' dominant-baseline='central' text-anchor='middle' font-size='85'%3E%F0%9F%91%BD%3C/text%3E%3C/svg%3E">
+  <title>OSB</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!--
+    Defines the CSS styles for the entire application, including layout, colors, and responsive design.
+    - Uses CSS variables for theming (light/dark modes), applied to background, text, and message colors.
+    - Styles the toolbar, chat container, messages, input area, modals, and model management page.
+    - Includes media queries for responsive design on smaller screens (e.g., mobile devices).
+    - The dark mode is toggled via the data-theme attribute, controlled by the theme button in the toolbar.
+    - Connected to: All HTML elements (toolbar, chat, input, modals, model page) and the JavaScript for theme toggling and dynamic class assignments (e.g., selected, incoming/outgoing messages).
+  -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html { height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+    :root {
+      --bg: #f0f2f5; --panel: #ffffff; --text: #1c1e21;
+      --incoming: #e4e6eb; --outgoing: #0084ff;
+      --text-incoming: #050505; --text-outgoing: #fff;
+      --input-bg: #ffffff; --input-border: #ccc;
+    }
+    [data-theme="dark"] {
+      --bg: #18191a; --panel: #242526; --text: #e4e6eb;
+      --incoming: #3a3b3c; --outgoing: #0562f4;
+      --text-incoming: #e4e6eb; --text-outgoing: #fff;
+      --input-bg: #3a3b3c; --input-border: #555;
+    }
+    .toolbar {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+      padding: 8px;
+      border-radius: 8px;
+    }
+    .buttons-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .toolbar button {
+      user-select: none;
+      width: 40px;
+      height: 40px;
+      border: none;
+      border-radius: 50%;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform .1s;
+      flex-shrink: 0;
+      font-size: 1.2em;
+    }
+    .toolbar input {
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--input-border);
+      background: var(--input-bg);
+      color: var(--text);
+      font-size: 0.95em;
+      width: 100%;
+    }
+    input[list]::-webkit-calendar-picker-indicator,
+    input[list]::-webkit-list-button,
+    input[list]::-moz-list-indicator,
+    input[list]::-ms-expand {
+      display: none !important;
+    }
+    /* Additional selectors to hide all possible dropdown arrows */
+    input::-webkit-calendar-picker-indicator,
+    input::-webkit-list-button,
+    input::-moz-list-indicator,
+    input::-ms-expand,
+    input[type="text"]::-webkit-calendar-picker-indicator,
+    input[type="text"]::-webkit-list-button,
+    input[type="text"]::-moz-list-indicator,
+    input[type="text"]::-ms-expand,
+    .model-select-container input::-webkit-calendar-picker-indicator,
+    .model-select-container input::-webkit-list-button,
+    .model-select-container input::-moz-list-indicator,
+    .model-select-container input::-ms-expand {
+      display: none !important;
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+    
+    /* More aggressive hiding for the model input specifically */
+    #modelInput::-webkit-calendar-picker-indicator,
+    #modelInput::-webkit-list-button,
+    #modelInput::-moz-list-indicator,
+    #modelInput::-ms-expand,
+    #modelInput::after,
+    #modelInput::before {
+      display: none !important;
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+      width: 0 !important;
+      height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      background: none !important;
+      content: none !important;
+    }
+    
+    /* Hide any pseudo-elements that might be showing arrows */
+    .model-select-container input::after,
+    .model-select-container input::before {
+      display: none !important;
+      content: none !important;
+    }
+    .toolbar button.selected { outline: 2px solid #555; }
+    .toolbar button:active { transform: scale(0.95); }
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: calc(60px + 20px + 8px) 10px 10px;
+      overflow-y: auto;
+      width: 100%;
+      padding-bottom: 80px;
+    }
+    .message {
+      max-width: 85%;
+      margin-bottom: 10px;
+      padding: 10px 15px;
+      border-radius: 18px;
+      user-select: text;
+    }
+    @media (max-width: 768px) {
+      .toolbar {
+        top: 5px;
+        left: 5px;
+        right: 5px;
+        gap: 5px;
+        padding: 5px;
+      }
+      .buttons-container {
+        gap: 5px;
+      }
+      .toolbar button {
+        width: 35px;
+        height: 35px;
+        font-size: 1.1em;
+      }
+      .toolbar input {
+        font-size: 0.85em;
+        padding: 6px 10px;
+      }
+      .chat-container {
+        padding: calc(50px + 20px + 5px) 5px 5px;
+        margin-top: 0;
+        padding-bottom: 70px;
+      }
+      .message {
+        max-width: 95%;
+      }
+      #model-page input[type="text"] {
+        font-size: 14px;
+        padding: 6px 8px;
+        min-width: 150px;
+      }
+      #model-page .default-model-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      #model-page .default-model-controls .model-select-container {
+        min-width: 150px;
+      }
+      #model-page button {
+        font-size: 14px;
+        padding: 8px 12px;
+      }
+    }
+    @media (max-width: 480px) {
+      .toolbar {
+        top: 0;
+        left: 0;
+        right: 0;
+        padding: 5px;
+        border-radius: 0;
+      }
+      .buttons-container {
+        gap: 2px;
+      }
+      .toolbar button {
+        width: 30px;
+        height: 30px;
+        font-size: 1em;
+        margin: 2px;
+      }
+      .model-select-container {
+        width: 100px;
+        min-width: 80px;
+      }
+      .toolbar input {
+        font-size: 0.8em;
+        padding: 6px 8px;
+      }
+      .chat-container {
+        padding-top: calc(40px + 20px);
+        padding-left: 5px;
+        padding-right: 5px;
+        padding-bottom: 60px;
+      }
+      .message {
+        padding: 8px 12px;
+        font-size: 0.9em;
+      }
+      .msg-actions {
+        font-size: 0.75em;
+      }
+      #model-page input[type="text"] {
+        font-size: 13px;
+        padding: 5px 6px;
+        min-width: 120px;
+      }
+      #model-page .default-model-controls {
+        gap: 6px;
+      }
+      #model-page .default-model-controls .model-select-container {
+        min-width: 120px;
+      }
+      #model-page button {
+        font-size: 13px;
+        padding: 6px 10px;
+      }
+    }
+    .message .text {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .message .image {
+      max-width: 100%;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .incoming {
+      background: var(--incoming); color: var(--text-incoming);
+      align-self: flex-start; border-top-left-radius: 4px;
+    }
+    .outgoing {
+      background: var(--outgoing); color: var(--text-outgoing);
+      align-self: flex-end; border-top-right-radius: 4px;
+    }
+    .msg-actions {
+      display: flex; gap: 8px; font-size: 0.8em; margin-top: 4px;
+    }
+    .msg-actions button {
+      background: transparent; border: none; color: #888; cursor: pointer;
+    }
+    .msg-actions button:hover { color: #555; }
+    .input-container {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: flex-end;
+      padding: 10px;
+      background: var(--panel);
+      width: 100%;
+      box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+      z-index: 99;
+    }
+    .input-container button.camera {
+      margin-right: 10px;
+      padding: 10px;
+      border-radius: 18px;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--input-border);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 1.2em;
+    }
+    .input-container textarea {
+      flex: 1;
+      border: 1px solid var(--input-border);
+      background: var(--input-bg);
+      color: var(--text);
+      border-radius: 18px;
+      padding: 10px 15px;
+      resize: none;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 1em;
+      line-height: 1.4;
+      /* Added for better touch scrolling on Android */
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    .input-container button.send {
+      margin-left: 10px;
+      padding: 10px 20px;
+      border-radius: 18px;
+      background: var(--outgoing);
+      color: var(--text-outgoing);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .input-container button.send[disabled],
+    .input-container button.camera[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .loader {
+      border: 3px solid var(--panel);
+      border-top: 3px solid var(--text);
+      border-radius: 50%;
+      width: 16px;
+      height: 16px;
+      animation: spin 1s linear infinite;
+      margin-left: 8px;
+    }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .model-select-container {
+      position: relative;
+      display: inline-block;
+      width: 150px;
+      min-width: 150px;
+      max-width: 100%;
+    }
+    .model-select-container input {
+      padding-right: 30px;
+      background: var(--input-bg);
+    }
+    .dropdown-arrow {
+      position: absolute;
+      right: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      user-select: none;
+      font-size: 14px;
+      color: var(--text);
+      padding: 5px;
+    }
+    .dropdown-arrow:hover {
+      transform: translateY(-50%) scale(1.1);
+    }
+    .model-dropdown,
+    .camera-options {
+      position: absolute;
+      bottom: calc(100% + 5px);
+      left: 0;
+      background: var(--panel);
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 100;
+      display: none;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    .model-dropdown {
+      top: 100%;
+      bottom: auto;
+      width: 100%;
+    }
+    .camera-options {
+      width: auto;
+      min-width: 120px;
+      white-space: nowrap;
+    }
+    .model-option,
+    .camera-option {
+      padding: 8px 10px;
+      cursor: pointer;
+      color: var(--text);
+    }
+    .model-option:hover,
+    .camera-option:hover {
+      background: var(--incoming);
+    }
+    #model-page {
+      padding: calc(60px + 20px + 8px) 10px 10px;
+      flex: 1;
+      display: none;
+      overflow-y: auto;
+      width: 100%;
+      padding-bottom: 80px;
+    }
+    #model-page .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: var(--panel);
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      color: var(--text);
+    }
+    #model-page h1 {
+      color: var(--outgoing);
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    #model-page .section {
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--input-border);
+    }
+    #model-page .section:last-child {
+      border-bottom: none;
+    }
+    #model-page button {
+      padding: 10px 15px;
+      background-color: var(--outgoing);
+      color: var(--text-outgoing);
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      display: inline-block;
+      margin-right: 10px;
+    }
+    #model-page button:hover {
+      background-color: #0056b3;
+    }
+    #model-page .section-button {
+      display: block;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    #model-page .delete-button {
+      background-color: #dc3545;
+      margin-left: 10px;
+      flex-shrink: 0;
+      width: auto;
+      display: inline-block;
+    }
+    #model-page .delete-button:hover {
+      background-color: #c82333;
+    }
+    #model-page input[type="text"] {
+      padding: 8px;
+      margin-right: 10px;
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      font-size: 16px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 200px;
+      flex-grow: 1;
+      background-color: var(--input-bg);
+      color: var(--text);
+      box-sizing: border-box;
+    }
+    #model-page #modelListUl {
+      list-style: none;
+      padding: 0;
+    }
+    #model-page #modelListUl li {
+      background-color: var(--incoming);
+      margin-bottom: 10px;
+      padding: 15px;
+      border-radius: 5px;
+      border-left: 5px solid var(--outgoing);
+      word-break: break-all;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-incoming);
+    }
+    #model-page #modelListUl li .model-info {
+      flex-grow: 1;
+    }
+    #model-page #modelListUl li strong {
+      color: var(--outgoing);
+    }
+    #model-page #statusMessage, #model-page #pullStatus {
+      text-align: center;
+      color: red;
+      font-weight: bold;
+      margin-top: 15px;
+    }
+    #model-page #pullProgressBar {
+      width: 100%;
+      background-color: var(--input-bg);
+      border-radius: 5px;
+      margin-top: 10px;
+      height: 20px;
+      overflow: hidden;
+    }
+    #model-page #pullProgressFill {
+      height: 100%;
+      width: 0%;
+      background-color: #28a745;
+      text-align: center;
+      color: white;
+      line-height: 20px;
+      font-size: 0.9em;
+      transition: width 0.3s ease-in-out;
+    }
+    #model-page .pull-controls {
+      display: flex;
+      align-items: center;
+      margin-top: 10px;
+    }
+    #model-page .default-model-controls {
+      display: flex;
+      align-items: center;
+      margin-top: 10px;
+      gap: 10px;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    #model-page .default-model-controls .model-select-container {
+      flex-grow: 1;
+      min-width: 200px;
+      max-width: 100%;
+    }
+    #model-page #currentDefaultModel {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: var(--incoming);
+      border-radius: 5px;
+      border-left: 5px solid var(--outgoing);
+      color: var(--text-incoming);
+    }
+    #model-page #defaultModelStatus {
+      text-align: center;
+      color: #28a745;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    #camera-modal, #image-preview-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    .modal-content {
+      background: var(--panel);
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 90%;
+      max-height: 90%;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: var(--text);
+    }
+    #camera-video {
+      max-width: 100%;
+      max-height: 50vh;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    #preview-image {
+      max-width: 100%;
+      max-height: 50vh;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    #image-text {
+      width: 100%;
+      min-height: 100px;
+      padding: 10px;
+      border: 1px solid var(--input-border);
+      border-radius: 8px;
+      background: var(--input-bg);
+      color: var(--text);
+      margin-bottom: 10px;
+      resize: vertical;
+      font-size: 1em;
+    }
+    .modal-buttons {
+      display: flex;
+      gap: 10px;
+    }
+    .modal-buttons button {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 1em;
+    }
+    .modal-buttons button.primary {
+      background: var(--outgoing);
+      color: var(--text-outgoing);
+    }
+    .modal-buttons button.secondary {
+      background: var(--input-bg);
+      color: var(--text);
+      border: 1px solid var(--input-border);
+    }
+    .modal-buttons button:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    The toolbar section contains buttons for app functionality and a model selection dropdown.
+    - Buttons include model management page toggle, theme toggle, save conversation, and text formatting tools (highlight, pencil, eraser).
+    - The model-select-container allows users to select an AI model from a dropdown or datalist, with filtering capabilities.
+    - Connected to: The JavaScript section for button event listeners (theme toggle, save PDF, text formatting, model selection) and the model page for updating the model list.
+  -->
+  <div class="toolbar">
+    <div class="buttons-container">
+      <button id="btn-model-page" title="Model Management" aria-label="Model Management">O</button>
+      <button id="btn-dark" title="Toggle Dark Mode" aria-label="Toggle Dark Mode">🔅</button>
+      <button id="btn-save" title="Save Conversation" aria-label="Save Conversation">💾</button>
+      <button id="btn-reload" title="Reload Page" aria-label="Reload Page">🔄</button>
+      <button id="btn-highlight" title="Highlighter" aria-label="Highlight Text">🖍️</button>
+      <button id="btn-pencil" title="Pencil" aria-label="Underline Text">✏️</button>
+      <button id="btn-eraser" title="Eraser" aria-label="Remove Highlight or Underline">⬜</button>
+    </div>
+    <div class="model-select-container">
+      <input id="modelInput" placeholder="default gemma3:4b" aria-label="Select Model" />
+      <span class="dropdown-arrow" aria-hidden="true">▼</span>
+      <div class="model-dropdown"></div>
+    </div>
+    <datalist id="modelList">
+      <option value="gemma3:1b">
+      <option value="smollm2:135m">
+      <option value="tinyllama:1.1b">
+      <option value="qwen3:0.6b">
+      <option value="qwen3:1.7b">
+      <option value="gemma3:4b">
+      <option value="qwen2.5vl:3b">
+      <option value="moondream:1.8b">
+      <option value="phi:2.7b">
+      <option value="gemma2:2b">
+      <option value="qwen3:4b">
+    </datalist>
+  </div>
+  <!--
+    The chat page contains the chat container for displaying messages and the input container for sending messages.
+    - The chat-container holds incoming and outgoing messages, styled differently based on their type.
+    - The input-container includes a camera button for image input, a textarea for text input, and a send button.
+    - The camera-options dropdown allows users to insert an image or take a picture, triggering modals.
+    - Connected to: The JavaScript section for message sending, image handling, and camera functionality, and the CSS for styling messages and input elements.
+  -->
+  <div id="chat-page">
+    <div class="chat-container" id="chat"></div>
+    <div class="input-container">
+      <button class="camera" id="cameraBtn" title="Add Image" aria-label="Add Image">📷</button>
+      <div class="camera-options" id="cameraOptions">
+        <div class="camera-option" id="insertImage">Insert Image</div>
+        <div class="camera-option" id="takePicture">Take Picture</div>
+      </div>
+      <input type="file" id="imageInput" accept="image/*" style="display: none;" aria-label="Upload Image" />
+      <textarea id="prompt" placeholder="Type a message..." title="Press Ctrl+Enter to send" rows="1" aria-label="Message Input"></textarea>
+      <button class="send" id="sendBtn" aria-label="Send Message">Send</button>
+    </div>
+  </div>
+  <!--
+    The model page provides an interface for managing Ollama AI models.
+    - Allows users to pull new models by entering a model name and displays a progress bar.
+    - Lists local models with details (name, size, modified date, digest) and a delete option.
+    - Displays status messages for fetch, pull, and delete operations.
+    - Connected to: The JavaScript section for fetching, pulling, and deleting models via the Ollama API, and the toolbar's model management button to toggle visibility.
+  -->
+  <div id="model-page" style="display: none;">
+    <div class="container">
+      <h1>Ollama Model Management</h1>
+      <p>Ensure your Ollama server is running and configured to allow CORS requests from your origin (e.g., by setting <code>OLLAMA_ORIGINS="*"</code> before starting Ollama).</p>
+      <div class="section">
+        <h2>Pull New Model</h2>
+        <div class="pull-controls">
+          <input type="text" id="modelNameInput" placeholder="e.g., llama3, mistral:latest" aria-label="Model Name Input">
+          <button id="pullModelButton" aria-label="Pull Model">Pull Model</button>
+        </div>
+        <div id="pullStatus"></div>
+        <div id="pullProgressBar">
+          <div id="pullProgressFill">0%</div>
+        </div>
+      </div>
+      <div class="section">
+        <h2>Set Default Model</h2>
+        <div class="default-model-controls">
+          <div class="model-select-container">
+            <input type="text" id="defaultModelInput" placeholder="Model name" aria-label="Default Model Input">
+            <span class="dropdown-arrow" aria-hidden="true">▼</span>
+            <div class="model-dropdown" id="defaultModelDropdown"></div>
+          </div>
+          <button id="setDefaultModelButton" aria-label="Set Default Model">Set as Default</button>
+        </div>
+        <div id="defaultModelStatus"></div>
+        <div id="currentDefaultModel"></div>
+      </div>
+      <div class="section">
+        <h2>Local Models</h2>
+        <button id="fetchModelsButton" class="section-button" aria-label="Fetch Ollama Models">Fetch Ollama Models</button>
+        <div id="statusMessage"></div>
+        <ul id="modelListUl"></ul>
+      </div>
+    </div>
+  </div>
+  <!--
+    The camera modal displays a live video feed for taking pictures.
+    - Includes buttons to switch cameras, capture a photo, or close the modal.
+    - Shows messages for camera access status or errors.
+    - Connected to: The JavaScript section for camera handling (startCamera, stopCamera, switchCamera) and the input container's camera button to trigger it.
+  -->
+  <div id="camera-modal">
+    <div class="modal-content">
+      <video id="camera-video" autoplay></video>
+      <div class="modal-buttons">
+        <button id="switch-camera" class="secondary" aria-label="Switch Camera">Switch Camera</button>
+        <button id="capture-photo" class="primary" aria-label="Capture Photo">Capture Photo</button>
+        <button id="close-camera" class="secondary" aria-label="Close Camera">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <!--
+    The image preview modal allows users to review and send an image with optional text.
+    - Displays the selected or captured image and a textarea for accompanying text.
+    - Includes buttons to send the image or cancel the operation.
+    - Connected to: The JavaScript section for image handling (sendImage, closePreview) and the input container's camera/image input to trigger it.
+  -->
+  <div id="image-preview-modal">
+    <div class="modal-content">
+      <img id="preview-image" src="" alt="Selected Image" />
+      <textarea id="image-text" placeholder="Add a message..." aria-label="Image Message Input"></textarea>
+      <div class="modal-buttons">
+        <button id="send-image" class="primary" aria-label="Send Image">Send</button>
+        <button id="close-preview" class="secondary" aria-label="Close Preview">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <!--
+    The JavaScript section contains the core logic for the application, wrapped in an IIFE for encapsulation.
+    - Initializes DOM elements and variables for API URLs, current tool, camera state, and image data.
+    - Defines functions for sanitizing text, populating model dropdowns, handling messages, camera operations, and model management.
+    - Sets up event listeners for buttons (send, camera, theme, save, model page toggle), text input, image input, and model management actions.
+    - Handles streaming API responses for chat, PDF generation for saving conversations, and Ollama API interactions for model management.
+    - Connected to: All HTML elements (toolbar, chat, input, modals, model page) and the CSS for dynamic class and style updates.
+  -->
+  <script>
+    (function() {
+      /*
+        Defines constants for API endpoints and retrieves DOM elements for manipulation.
+        - API_URL points to the chat completions endpoint for sending messages.
+        - OLLAMA_API_BASE_URL is used for model management (fetch, pull, delete).
+        - DOM elements are stored for the chat container, input fields, buttons, modals, and model page components.
+        - Connected to: The HTML elements referenced by IDs and classes, and subsequent functions that manipulate these elements.
+      */
+      const API_URL = 'http://localhost:11434/v1/chat/completions';
+      const OLLAMA_API_BASE_URL = 'http://localhost:11434/api';
+      const chat = document.getElementById('chat');
+      const promptIn = document.getElementById('prompt');
+      const sendBtn = document.getElementById('sendBtn');
+      const cameraBtn = document.getElementById('cameraBtn');
+      const cameraOptions = document.getElementById('cameraOptions');
+      const insertImage = document.getElementById('insertImage');
+      const takePicture = document.getElementById('takePicture');
+      const imageInput = document.getElementById('imageInput');
+      const themeBtn = document.getElementById('btn-dark');
+      const saveBtn = document.getElementById('btn-save');
+      const reloadBtn = document.getElementById('btn-reload');
+      const modelInput = document.getElementById('modelInput');
+      const toolBtns = {
+        highlight: document.getElementById('btn-highlight'),
+        pencil: document.getElementById('btn-pencil'),
+        eraser: document.getElementById('btn-eraser')
+      };
+      const cameraModal = document.getElementById('camera-modal');
+      const cameraVideo = document.getElementById('camera-video');
+      const switchCameraBtn = document.getElementById('switch-camera');
+      const capturePhotoBtn = document.getElementById('capture-photo');
+      const closeCameraBtn = document.getElementById('close-camera');
+      const imagePreviewModal = document.getElementById('image-preview-modal');
+      const previewImage = document.getElementById('preview-image');
+      const imageText = document.getElementById('image-text');
+      const sendImageBtn = document.getElementById('send-image');
+      const closePreviewBtn = document.getElementById('close-preview');
+      const modelSelectContainer = document.querySelector('.model-select-container');
+      const dropdownArrow = document.querySelector('.dropdown-arrow');
+      const modelDropdown = document.querySelector('.model-dropdown');
+      const modelListDatalist = document.getElementById('modelList');
+      const fetchModelsButton = document.getElementById('fetchModelsButton');
+      const modelListUl = document.getElementById('modelListUl');
+      const statusMessage = document.getElementById('statusMessage');
+      const modelNameInput = document.getElementById('modelNameInput');
+      const pullModelButton = document.getElementById('pullModelButton');
+      const pullStatus = document.getElementById('pullStatus');
+      const pullProgressBar = document.getElementById('pullProgressBar');
+      const pullProgressFill = document.getElementById('pullProgressFill');
+      const btnModelPage = document.getElementById('btn-model-page');
+      const chatPage = document.getElementById('chat-page');
+      const modelPage = document.getElementById('model-page');
+      const defaultModelInput = document.getElementById('defaultModelInput');
+      const defaultModelDropdown = document.getElementById('defaultModelDropdown');
+      const setDefaultModelButton = document.getElementById('setDefaultModelButton');
+      const defaultModelStatus = document.getElementById('defaultModelStatus');
+      const currentDefaultModel = document.getElementById('currentDefaultModel');
+
+      /*
+        Initializes variables for tracking the current tool, abort controller, camera stream, and image data.
+        - currentTool tracks the active text formatting tool (highlight, pencil, eraser).
+        - abortController manages the cancellation of ongoing API requests.
+        - mediaStream and cameraDevices handle camera operations.
+        - selectedImageData stores the base64-encoded image for sending.
+        - Sets the default model to 'gemma3:4b'.
+        - Connected to: Functions for text formatting, message sending, camera handling, and model selection.
+      */
+      let currentTool = null;
+      let abortController = null;
+      let mediaStream = null;
+      let cameraDevices = [];
+      let currentCameraIndex = 0;
+      let selectedImageData = null;
+
+      modelInput.value = 'gemma3:4b'; // Default to a vision model
+
+      /*
+        Sanitizes text to prevent XSS attacks by converting input to text content.
+        - Used when displaying user input or API responses in messages and model names.
+        - Connected to: The addMessage, sendMessage, and model management functions.
+      */
+      function sanitizeText(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      /*
+        Populates the model dropdown and datalist with available models.
+        - Dynamically creates dropdown options and datalist entries from a model list.
+        - Adds click listeners to dropdown options to update the model input.
+        - Called initially with predefined models and updated when fetching local models.
+        - Connected to: The model-select-container in the toolbar and the fetchAndDisplayModels function.
+      */
+      function populateModelDropdownAndDatalist(models) {
+        modelDropdown.innerHTML = '';
+        modelListDatalist.innerHTML = '';
+        models.forEach(modelName => {
+          const item = document.createElement('div');
+          item.textContent = modelName;
+          item.className = 'model-option';
+          item.setAttribute('data-model', modelName);
+          item.addEventListener('click', () => {
+            modelInput.value = modelName;
+            modelDropdown.style.display = 'none';
+            const event = new Event('input', { bubbles: true });
+            modelInput.dispatchEvent(event);
+          });
+          modelDropdown.appendChild(item);
+          const option = document.createElement('option');
+          option.value = modelName;
+          modelListDatalist.appendChild(option);
+        });
+        
+        // Also populate the default model dropdown
+        populateDefaultModelDropdown(models);
+      }
+
+      /*
+        Initializes the model dropdown with predefined models from the datalist.
+        - Extracts model values from the datalist and calls populateModelDropdownAndDatalist.
+        - Connected to: The model-select-container and the populateModelDropdownAndDatalist function.
+      */
+      const initialModels = Array.from(modelListDatalist.querySelectorAll('option')).map(option => option.value);
+      populateModelDropdownAndDatalist(initialModels);
+
+      /*
+        Toggles the model dropdown visibility when clicking the dropdown arrow.
+        - Shows or hides the dropdown and scrolls to the selected model if visible.
+        - Connected to: The model-select-container and the model-dropdown elements.
+      */
+      dropdownArrow.addEventListener('click', () => {
+        const isVisible = modelDropdown.style.display === 'block';
+        modelDropdown.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+          modelDropdown.querySelectorAll('.model-option').forEach(option => {
+            option.style.display = 'block';
+          });
+          const selectedOption = modelDropdown.querySelector(`.model-option[data-model="${modelInput.value}"]`);
+          if (selectedOption) {
+            selectedOption.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } else {
+            modelDropdown.scrollTop = 0;
+          }
+        }
+      });
+
+      /*
+        Closes dropdowns (model and camera options) when clicking outside their containers.
+        - Ensures dropdowns are hidden when interacting with other parts of the UI.
+        - Connected to: The model-select-container, camera-options, and their respective dropdowns.
+      */
+      document.addEventListener('click', e => {
+        if (!modelSelectContainer.contains(e.target)) {
+          modelDropdown.style.display = 'none';
+        }
+        if (!cameraBtn.contains(e.target) && !cameraOptions.contains(e.target)) {
+          cameraOptions.style.display = 'none';
+        }
+      });
+
+      /*
+        Filters the model dropdown based on user input in the model input field.
+        - Shows or hides dropdown options matching the input text.
+        - Opens the dropdown if there are matching options.
+        - Connected to: The model-input field and the model-dropdown.
+      */
+      modelInput.addEventListener('input', () => {
+        const searchText = modelInput.value.toLowerCase();
+        let hasVisibleOptions = false;
+        modelDropdown.querySelectorAll('.model-option').forEach(option => {
+          if (searchText === '' || option.textContent.toLowerCase().includes(searchText)) {
+            option.style.display = 'block';
+            hasVisibleOptions = true;
+          } else {
+            option.style.display = 'none';
+          }
+        });
+        modelDropdown.style.display = searchText && hasVisibleOptions ? 'block' : 'none';
+      });
+
+      /*
+        Auto-resizes the textarea based on its content.
+        - Adjusts the textarea height to fit the input text, improving usability.
+        - Connected to: The prompt textarea in the input-container.
+      */
+      promptIn.addEventListener('input', () => {
+        promptIn.style.height = 'auto';
+        promptIn.style.height = `${promptIn.scrollHeight}px`;
+      });
+
+      /*
+        Sends a message when Ctrl+Enter is pressed in the textarea.
+        - Triggers the sendMessage function to process the input.
+        - Connected to: The prompt textarea and the sendMessage function.
+      */
+      promptIn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && e.ctrlKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      /*
+        Handles pasted content in the textarea, supporting text, images, and other formats.
+        - Extracts text, images, and other content from the clipboard.
+        - For text: inserts it directly into the textarea.
+        - For images: opens the image preview modal with the pasted image.
+        - For mixed content: handles both text and images appropriately.
+        - Connected to: The prompt textarea, image-preview-modal, and sendMessage function.
+      */
+      promptIn.addEventListener('paste', async e => {
+        // Try modern Clipboard API first
+        if (navigator.clipboard && navigator.clipboard.read) {
+          try {
+            const clipboardItems = await navigator.clipboard.read();
+            let hasImage = false;
+            let hasText = false;
+            let imageData = null;
+            let textData = '';
+            
+            // Check what types of content we have
+            for (const item of clipboardItems) {
+              if (item.types.some(type => type.startsWith('image/'))) {
+                hasImage = true;
+              }
+              if (item.types.includes('text/plain') || item.types.includes('text/html')) {
+                hasText = true;
+              }
+            }
+            
+            // Process the content
+            for (const item of clipboardItems) {
+              // Handle images
+              for (const type of item.types) {
+                if (type.startsWith('image/')) {
+                  const blob = await item.getType(type);
+                  const reader = new FileReader();
+                  reader.onload = event => {
+                    imageData = event.target.result;
+                    selectedImageData = imageData;
+                    previewImage.src = imageData;
+                    
+                    if (textData) {
+                      imageText.value = textData;
+                    }
+                    
+                    imagePreviewModal.style.display = 'flex';
+                  };
+                  reader.readAsDataURL(blob);
+                  break;
+                }
+              }
+              
+              // Handle text
+              if (item.types.includes('text/plain')) {
+                const textBlob = await item.getType('text/plain');
+                textData = await textBlob.text();
+                
+                if (!hasImage) {
+                  insertTextAtCursor(textData);
+                  e.preventDefault(); // Prevent default paste for text
+                }
+              } else if (item.types.includes('text/html')) {
+                const htmlBlob = await item.getType('text/html');
+                const html = await htmlBlob.text();
+                const plainText = extractTextFromHTML(html);
+                
+                if (!hasImage) {
+                  insertTextAtCursor(plainText);
+                  e.preventDefault(); // Prevent default paste for text
+                } else {
+                  textData = plainText;
+                }
+              }
+            }
+            
+            if (hasImage) {
+              e.preventDefault();
+            }
+            return;
+          } catch (err) {
+            console.log('Modern clipboard API failed, falling back to legacy method:', err);
+          }
+        }
+        
+        // Fallback to legacy clipboard API
+        const items = e.clipboardData.items;
+        let hasImage = false;
+        let hasText = false;
+        let imageData = null;
+        let textData = '';
+        
+        // First pass: check what types of content we have
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            hasImage = true;
+          } else if (item.type === 'text/plain' || item.type === 'text/html') {
+            hasText = true;
+          }
+        }
+        
+        // Second pass: process the content
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            const blob = item.getAsFile();
+            if (blob) {
+              const reader = new FileReader();
+              reader.onload = event => {
+                imageData = event.target.result;
+                selectedImageData = imageData;
+                previewImage.src = imageData;
+                
+                // If we also have text, add it to the image text
+                if (textData) {
+                  imageText.value = textData;
+                }
+                
+                imagePreviewModal.style.display = 'flex';
+              };
+              reader.readAsDataURL(blob);
+            }
+          } else if (item.type === 'text/plain') {
+            item.getAsString(text => {
+              textData = text;
+              
+              // If we only have text (no image), insert it directly into the textarea
+              if (!hasImage) {
+                insertTextAtCursor(text);
+                e.preventDefault(); // Prevent default paste for text
+              } else {
+                // If we have both text and image, store text for image modal
+                imageText.value = text;
+              }
+            });
+          } else if (item.type === 'text/html') {
+            // For HTML content, extract plain text
+            item.getAsString(html => {
+              const plainText = extractTextFromHTML(html);
+              
+              if (!hasImage) {
+                insertTextAtCursor(plainText);
+                e.preventDefault(); // Prevent default paste for text
+              } else {
+                // Store for image modal
+                imageText.value = plainText;
+              }
+            });
+          }
+        }
+        
+        // If we have an image, prevent default paste behavior
+        if (hasImage) {
+          e.preventDefault();
+        }
+        // If we only have text, let the default paste behavior handle it
+        // (we've already inserted the text above, but this ensures compatibility)
+      });
+
+      /*
+        Inserts text at the current cursor position in the textarea.
+        - Handles cursor positioning and text insertion.
+        - Updates the textarea value and cursor position.
+        - Triggers input event to update height.
+        - Connected to: The paste event handler.
+      */
+      function insertTextAtCursor(text) {
+        const start = promptIn.selectionStart;
+        const end = promptIn.selectionEnd;
+        const currentValue = promptIn.value;
+        
+        // Insert text at cursor position
+        const newValue = currentValue.substring(0, start) + text + currentValue.substring(end);
+        promptIn.value = newValue;
+        
+        // Set cursor position after the pasted text
+        const newCursorPos = start + text.length;
+        promptIn.setSelectionRange(newCursorPos, newCursorPos);
+        
+        // Trigger input event to update height
+        promptIn.dispatchEvent(new Event('input'));
+      }
+
+      /*
+        Extracts plain text from HTML content.
+        - Removes HTML tags and returns clean text.
+        - Handles various HTML formats safely.
+        - Connected to: The paste event handler.
+      */
+      function extractTextFromHTML(html) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
+        return tempDiv.textContent || tempDiv.innerText || '';
+      }
+
+      /*
+        Toggles text formatting tools (highlight, pencil, eraser) when their buttons are clicked.
+        - Manages the selected state of tools and updates the currentTool variable.
+        - Connected to: The toolbar buttons and the text selection handling logic.
+      */
+      Object.entries(toolBtns).forEach(([tool, btn]) => {
+        btn.addEventListener('click', () => {
+          if (currentTool === tool) {
+            btn.classList.remove('selected');
+            btn.setAttribute('aria-pressed', 'false');
+            currentTool = null;
+          } else {
+            if (currentTool) {
+              toolBtns[currentTool].classList.remove('selected');
+              toolBtns[currentTool].setAttribute('aria-pressed', 'false');
+            }
+            btn.classList.add('selected');
+            btn.setAttribute('aria-pressed', 'true');
+            currentTool = tool;
+          }
+        });
+      });
+
+      /*
+        Applies text formatting (highlight, underline, or erase) to selected text in messages.
+        - Listens for mouseup/touchend events to detect text selection.
+        - Applies or removes formatting based on the current tool, within message text elements.
+        - Connected to: The toolbar's formatting buttons and the chat container's message elements.
+      */
+      ['mouseup', 'touchend'].forEach(evt => {
+        document.addEventListener(evt, e => {
+          if (!currentTool) return;
+          const sel = window.getSelection();
+          if (!sel || sel.isCollapsed) return;
+
+          const range = sel.getRangeAt(0);
+          let commonAncestor = range.commonAncestorContainer;
+          if (commonAncestor.nodeType === Node.TEXT_NODE) {
+            commonAncestor = commonAncestor.parentNode;
+          }
+
+          const messageText = commonAncestor.closest('.message .text');
+          if (!messageText || !chat.contains(messageText)) {
+            sel.removeAllRanges();
+            return;
+          }
+
+          if (currentTool === 'eraser') {
+            const spans = messageText.querySelectorAll('span');
+            const selectedSpans = Array.from(spans).filter(span => {
+              const spanRange = document.createRange();
+              spanRange.selectNodeContents(span);
+              return range.intersectsNode(span);
+            });
+            selectedSpans.forEach(span => {
+              if (span.style.backgroundColor || span.style.textDecoration) {
+                const parent = span.parentNode;
+                while (span.firstChild) {
+                  parent.insertBefore(span.firstChild, span);
+                }
+                parent.removeChild(span);
+                parent.normalize();
+              }
+            });
+          } else {
+            const span = document.createElement('span');
+            try {
+              range.surroundContents(span);
+              if (currentTool === 'highlight') {
+                span.style.backgroundColor = 'rgba(255,0,0,0.3)';
+              } else if (currentTool === 'pencil') {
+                span.style.textDecoration = 'underline';
+              }
+              messageText.normalize();
+            } catch (err) {
+              console.warn('Invalid selection range:', err);
+            }
+          }
+          sel.removeAllRanges();
+        });
+      });
+
+      /*
+        Toggles the camera options dropdown when the camera button is clicked.
+        - Shows or hides the insert image/take picture options.
+        - Connected to: The camera button in the input-container and the camera-options dropdown.
+      */
+      cameraBtn.addEventListener('click', () => {
+        const isVisible = cameraOptions.style.display === 'block';
+        cameraOptions.style.display = isVisible ? 'none' : 'block';
+      });
+
+      /*
+        Displays temporary messages in the camera modal for status or errors.
+        - Used during camera access, switching, or error states.
+        - Connected to: The camera-modal and camera handling functions (startCamera, switchCamera).
+      */
+      function showCameraMessage(message, isError = false) {
+        const existingMessage = cameraModal.querySelector('.camera-message');
+        if (existingMessage) existingMessage.remove();
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'camera-message';
+        messageDiv.textContent = message;
+        messageDiv.style.position = 'absolute';
+        messageDiv.style.top = '50%';
+        messageDiv.style.left = '50%';
+        messageDiv.style.transform = 'translate(-50%, -50%)';
+        messageDiv.style.backgroundColor = isError ? 'rgba(255, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.7)';
+        messageDiv.style.color = 'white';
+        messageDiv.style.padding = '10px 20px';
+        messageDiv.style.borderRadius = '8px';
+        messageDiv.style.zIndex = '210';
+        messageDiv.style.textAlign = 'center';
+        cameraModal.querySelector('.modal-content').appendChild(messageDiv);
+        if (!isError) {
+          setTimeout(() => messageDiv.remove(), 3000);
+        }
+      }
+
+      /*
+        Removes the camera message from the modal.
+        - Called when the message is no longer needed (e.g., after successful camera access).
+        - Connected to: The camera-modal and camera handling functions.
+      */
+      function hideCameraMessage() {
+        const messageDiv = cameraModal.querySelector('.camera-message');
+        if (messageDiv) messageDiv.remove();
+      }
+
+      /*
+        Starts the camera stream and displays it in the camera modal.
+        - Requests camera access, enumerates devices, and selects a rear camera if available.
+        - Shows status messages during access and handles errors (e.g., permission denied).
+        - Connected to: The camera-modal, camera-video, and the takePicture option in camera-options.
+      */
+      async function startCamera() {
+        showCameraMessage('Requesting camera access...');
+        capturePhotoBtn.disabled = true;
+        switchCameraBtn.disabled = true;
+        closeCameraBtn.disabled = true;
+        try {
+          cameraDevices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'videoinput');
+          if (!cameraDevices.length) {
+            showCameraMessage('No cameras found on this device.', true);
+            closeCameraBtn.disabled = false;
+            return;
+          }
+          let rearCamera = cameraDevices.find(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('environment')) || cameraDevices[0];
+          currentCameraIndex = cameraDevices.indexOf(rearCamera);
+          const constraints = { video: { deviceId: rearCamera.deviceId }, audio: false };
+          mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+          cameraVideo.srcObject = mediaStream;
+          cameraModal.style.display = 'flex';
+          cameraVideo.style.transform = rearCamera.label.toLowerCase().includes('front') || rearCamera.label.toLowerCase().includes('user') ? 'scaleX(-1)' : 'scaleX(1)';
+          hideCameraMessage();
+          capturePhotoBtn.disabled = false;
+          switchCameraBtn.disabled = cameraDevices.length < 2;
+          closeCameraBtn.disabled = false;
+        } catch (err) {
+          console.error('Camera access error:', err);
+          let errorMessage = 'Failed to access camera.';
+          if (err.name === 'NotAllowedError') {
+            errorMessage = 'Camera access denied. Please allow camera access in your browser settings.';
+          } else if (err.name === 'NotFoundError') {
+            errorMessage = 'No camera available on this device.';
+          }
+          showCameraMessage(errorMessage, true);
+          closeCameraBtn.disabled = false;
+        }
+      }
+
+      /*
+        Stops the camera stream and closes the camera modal.
+        - Terminates the media stream and clears the video source.
+        - Connected to: The camera-modal, close-camera button, and switchCameraBtn.
+      */
+      function stopCamera() {
+        if (mediaStream) {
+          mediaStream.getTracks().forEach(track => track.stop());
+          mediaStream = null;
+        }
+        cameraVideo.srcObject = null;
+        cameraModal.style.display = 'none';
+        hideCameraMessage();
+      }
+
+      /*
+        Sets up event listeners for camera-related actions.
+        - takePicture: Triggers startCamera to open the camera modal.
+        - switchCameraBtn: Switches between available cameras, updating the stream.
+        - capturePhotoBtn: Captures a photo, converts it to base64, and opens the image preview modal.
+        - closeCameraBtn: Calls stopCamera to close the modal.
+        - Connected to: The camera-options, camera-modal, and image-preview-modal.
+      */
+      takePicture.addEventListener('click', () => {
+        cameraOptions.style.display = 'none';
+        startCamera();
+      });
+
+      switchCameraBtn.addEventListener('click', async () => {
+        if (cameraDevices.length < 2) return;
+        currentCameraIndex = (currentCameraIndex + 1) % cameraDevices.length;
+        showCameraMessage('Switching camera...');
+        stopCamera();
+        try {
+          const constraints = { video: { deviceId: cameraDevices[currentCameraIndex].deviceId }, audio: false };
+          mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+          cameraVideo.srcObject = mediaStream;
+          cameraModal.style.display = 'flex';
+          cameraVideo.style.transform = cameraDevices[currentCameraIndex].label.toLowerCase().includes('front') || cameraDevices[currentCameraIndex].label.toLowerCase().includes('user') ? 'scaleX(-1)' : 'scaleX(1)';
+          hideCameraMessage();
+          capturePhotoBtn.disabled = false;
+          switchCameraBtn.disabled = cameraDevices.length < 2;
+          closeCameraBtn.disabled = false;
+        } catch (err) {
+          console.error('Error switching camera:', err);
+          showCameraMessage('Failed to switch camera.', true);
+          closeCameraBtn.disabled = false;
+        }
+      });
+
+      capturePhotoBtn.addEventListener('click', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = cameraVideo.videoWidth;
+        canvas.height = cameraVideo.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (cameraDevices[currentCameraIndex].label.toLowerCase().includes('front') || cameraDevices[currentCameraIndex].label.toLowerCase().includes('user')) {
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(cameraVideo, 0, 0, canvas.width, canvas.height);
+        selectedImageData = canvas.toDataURL('image/jpeg');
+        stopCamera();
+        previewImage.src = selectedImageData;
+        imageText.value = '';
+        imagePreviewModal.style.display = 'flex';
+      });
+
+      closeCameraBtn.addEventListener('click', stopCamera);
+
+      /*
+        Handles image file selection from the file input.
+        - Triggers the file picker when the insertImage option is clicked.
+        - Reads the selected image as base64 and opens the image preview modal.
+        - Connected to: The camera-options, image-input, and image-preview-modal.
+      */
+      insertImage.addEventListener('click', () => {
+        cameraOptions.style.display = 'none';
+        imageInput.click();
+      });
+
+      imageInput.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = event => {
+            selectedImageData = event.target.result;
+            previewImage.src = selectedImageData;
+            imageText.value = '';
+            imagePreviewModal.style.display = 'flex';
+          };
+          reader.readAsDataURL(file);
+        }
+        imageInput.value = '';
+      });
+
+      /*
+        Closes the image preview modal and clears the selected image.
+        - Connected to: The image-preview-modal and the close-preview button.
+      */
+      closePreviewBtn.addEventListener('click', () => {
+        imagePreviewModal.style.display = 'none';
+        selectedImageData = null;
+      });
+
+      /*
+        Sends the image and optional text from the image preview modal.
+        - Calls sendMessage with the image data and text, then closes the modal.
+        - Connected to: The image-preview-modal, send-image button, and sendMessage function.
+      */
+      sendImageBtn.addEventListener('click', () => {
+        const text = imageText.value.trim();
+        if (!selectedImageData && !text) return;
+        sendMessage(text, selectedImageData);
+        imagePreviewModal.style.display = 'none';
+        selectedImageData = null;
+        imageText.value = '';
+      });
+
+      /*
+        Streams API responses for chat messages, updating the UI in real-time.
+        - Sends a POST request to the API_URL and processes the streaming response.
+        - Appends response chunks to the message text element and scrolls the chat.
+        - Handles errors and aborts via the abortController.
+        - Connected to: The sendMessage function and the chat container.
+      */
+      async function streamResponse(apiUrl, payload, outputElement, signal) {
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server Error: ${errorText}`);
+          }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder('utf-8');
+          let buffer = '';
+          while (true) {
+            if (signal.aborted) return;
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (signal.aborted) return;
+              if (line.trim().startsWith('data:')) {
+                const jsonPart = line.replace('data:', '').trim();
+                if (jsonPart === '[DONE]') continue;
+                try {
+                  const parsed = JSON.parse(jsonPart);
+                  const delta = parsed.choices?.[0]?.delta?.content || '';
+                  outputElement.textContent += delta;
+                  chat.scrollTop = chat.scrollHeight;
+                } catch (err) {
+                  console.error('Streaming JSON error:', err);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          throw err;
+        }
+      }
+
+      /*
+        Sends a user message (text and/or image) to the API and displays the response.
+        - Sanitizes text, adds the outgoing message to the chat, and keeps inputs active during processing.
+        - Supports aborting ongoing requests via the abortController.
+        - Creates an incoming message for the AI response and streams the API response.
+        - Adds action buttons (copy, edit, delete) to the AI message after completion.
+        - Connected to: The chat container, input-container, streamResponse, and handleAction functions.
+      */
+      async function sendMessage(text = '', imageData = null) {
+        // If there's an ongoing request, abort it first
+        if (abortController) {
+          abortController.abort();
+          abortController = null;
+          sendBtn.textContent = 'Send';
+          sendBtn.disabled = false;
+          const loader = sendBtn.querySelector('.loader');
+          if (loader) loader.remove();
+        }
+        
+        text = sanitizeText(text);
+        if (!text && !imageData) return;
+        
+        // Add user message to chat
+        addMessage(text, 'outgoing', imageData);
+        
+        // Clear input but keep it enabled
+        promptIn.value = '';
+        promptIn.style.height = 'auto';
+        
+        // Update send button to show it's processing
+        sendBtn.textContent = 'Stop';
+        sendBtn.disabled = false;
+        
+        // Add loader to send button
+        const loader = document.createElement('div');
+        loader.className = 'loader';
+        sendBtn.appendChild(loader);
+        
+        // Add visual indicator that processing is happening
+        const processingIndicator = document.createElement('div');
+        processingIndicator.className = 'processing-indicator';
+        processingIndicator.textContent = 'Processing...';
+        processingIndicator.style.cssText = `
+          position: fixed;
+          top: 70px;
+          right: 10px;
+          background: var(--outgoing);
+          color: var(--text-outgoing);
+          padding: 5px 10px;
+          border-radius: 15px;
+          font-size: 12px;
+          z-index: 1000;
+          opacity: 0.8;
+        `;
+        document.body.appendChild(processingIndicator);
+        
+        // Create AI message container
+        const model = modelInput.value.trim() || 'gemma3:4b';
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'message incoming';
+        aiMsg.innerHTML = `<div class='text'></div>`;
+        const aiText = aiMsg.querySelector('.text');
+        chat.appendChild(aiMsg);
+        chat.scrollTop = chat.scrollHeight;
+        
+        // Create new abort controller for this request
+        abortController = new AbortController();
+        const { signal } = abortController;
+        
+        try {
+          const messageContent = [];
+          if (imageData) {
+            const base64Data = imageData.split(',')[1];
+            messageContent.push({
+              type: 'image_url',
+              image_url: { url: `data:image/jpeg;base64,${base64Data}` }
+            });
+          }
+          if (text) {
+            messageContent.push({ type: 'text', text });
+          }
+          const payload = {
+            model,
+            stream: true,
+            messages: [{ role: 'user', content: messageContent }]
+          };
+          await streamResponse(API_URL, payload, aiText, signal);
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            aiText.textContent = `Error: ${err.message || 'Unknown error'}`;
+          } else {
+            aiText.textContent += '\n(Process stopped by user)';
+          }
+        } finally {
+          // Reset send button
+          sendBtn.textContent = 'Send';
+          sendBtn.disabled = false;
+          const currentLoader = sendBtn.querySelector('.loader');
+          if (currentLoader) currentLoader.remove();
+          abortController = null;
+          
+          // Remove processing indicator
+          const processingIndicator = document.querySelector('.processing-indicator');
+          if (processingIndicator) {
+            processingIndicator.remove();
+          }
+          
+          // Add action buttons to AI message
+          const actions = document.createElement('div');
+          actions.className = 'msg-actions';
+          ['Copy', 'Edit', 'Delete'].forEach(act => {
+            const b = document.createElement('button');
+            b.textContent = act;
+            b.setAttribute('aria-label', `${act} Message`);
+            b.onclick = () => handleAction(act.toLowerCase(), aiMsg);
+            actions.appendChild(b);
+          });
+          aiMsg.appendChild(actions);
+        }
+      }
+
+      /*
+        Triggers the sendMessage function when the send button is clicked.
+        - Sends the current text in the prompt textarea.
+        - Connected to: The send button in the input-container and the sendMessage function.
+      */
+      sendBtn.addEventListener('click', () => sendMessage(promptIn.value.trim()));
+
+      /*
+        Adds a message (text and/or image) to the chat container.
+        - Creates a message element with the specified type (incoming/outgoing) and content.
+        - Adds action buttons (copy, edit, delete) to the message.
+        - Scrolls the chat to the bottom to show the new message.
+        - Connected to: The chat container, sendMessage, and handleAction functions.
+      */
+      function addMessage(text, type, imageData = null) {
+        const msg = document.createElement('div');
+        msg.className = `message ${type}`;
+        if (imageData) {
+          const img = document.createElement('img');
+          img.src = imageData;
+          img.className = 'image';
+          img.alt = 'User uploaded image';
+          msg.appendChild(img);
+        }
+        const textDiv = document.createElement('div');
+        textDiv.className = 'text';
+        textDiv.textContent = text || '';
+        msg.appendChild(textDiv);
+        const actions = document.createElement('div');
+        actions.className = 'msg-actions';
+        ['Copy', 'Edit', 'Delete'].forEach(act => {
+          const b = document.createElement('button');
+          b.textContent = act;
+          b.setAttribute('aria-label', `${act} Message`);
+          b.onclick = () => handleAction(act.toLowerCase(), msg);
+          actions.appendChild(b);
+        });
+        msg.appendChild(actions);
+        chat.appendChild(msg);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      /*
+        Handles message actions (copy, edit, delete) for chat messages.
+        - Copy: Copies text and/or image to the clipboard with fallback methods.
+        - Edit: Prompts the user to edit the message text.
+        - Delete: Removes the message from the chat.
+        - Connected to: The msg-actions buttons in messages and the addMessage function.
+      */
+      async function handleAction(action, msg) {
+        const textElement = msg.querySelector('.text');
+        const imageElement = msg.querySelector('.image');
+        
+        if (action === 'copy') {
+          const text = textElement.textContent;
+          const hasImage = imageElement && imageElement.src;
+          
+          console.log('Copy action - Text:', text, 'Has image:', hasImage, 'Image src:', imageElement?.src);
+          
+          try {
+            // Try modern Clipboard API first
+            if (navigator.clipboard && navigator.clipboard.write) {
+              const clipboardItems = [];
+              
+              // Add text if present
+              if (text && text.trim()) {
+                clipboardItems.push(new ClipboardItem({
+                  'text/plain': new Blob([text], { type: 'text/plain' })
+                }));
+                console.log('Added text to clipboard items');
+              }
+              
+              // Add image if present
+              if (hasImage) {
+                try {
+                  console.log('Attempting to copy image:', imageElement.src);
+                  let imageBlob;
+                  
+                  // Try simple method first
+                  try {
+                    imageBlob = await copyImageSimple(imageElement);
+                  } catch (simpleErr) {
+                    console.log('Simple method failed, trying complex method:', simpleErr);
+                    
+                    // Handle different image sources with complex method
+                    if (imageElement.src.startsWith('data:')) {
+                      console.log('Processing data URL image');
+                      const response = await fetch(imageElement.src);
+                      imageBlob = await response.blob();
+                    } else if (imageElement.src.startsWith('blob:')) {
+                      console.log('Processing blob URL image');
+                      const response = await fetch(imageElement.src);
+                      imageBlob = await response.blob();
+                    } else {
+                      console.log('Processing regular URL image');
+                      imageBlob = await createImageBlobFromElement(imageElement);
+                    }
+                  }
+                  
+                  if (imageBlob) {
+                    console.log('Image blob created successfully:', imageBlob.type, imageBlob.size);
+                    clipboardItems.push(new ClipboardItem({
+                      [imageBlob.type]: imageBlob
+                    }));
+                  } else {
+                    console.warn('Failed to create image blob');
+                  }
+                } catch (imgErr) {
+                  console.warn('Failed to copy image with blob method:', imgErr);
+                  
+                  // Try alternative method for image copying
+                  try {
+                    console.log('Trying alternative image copy method');
+                    await copyImageUsingSelection(imageElement);
+                    // If we get here, the image was copied successfully
+                    if (text && text.trim()) {
+                      // Copy text separately
+                      await navigator.clipboard.writeText(text);
+                      showCopyFeedback('Text and image copied!');
+                    } else {
+                      showCopyFeedback('Image copied!');
+                    }
+                    return;
+                  } catch (altErr) {
+                    console.warn('Alternative image copy method also failed:', altErr);
+                    // Continue with text-only copy if both image methods fail
+                  }
+                }
+              }
+              
+              if (clipboardItems.length > 0) {
+                console.log('Writing to clipboard:', clipboardItems.length, 'items');
+                await navigator.clipboard.write(clipboardItems);
+                const feedbackMsg = hasImage && clipboardItems.length > 1 ? 'Text and image copied!' : 
+                                   hasImage && clipboardItems.length === 1 ? 'Image copied!' : 'Copied to clipboard!';
+                showCopyFeedback(feedbackMsg);
+                return;
+              } else {
+                console.warn('No clipboard items to write');
+              }
+            } else {
+              console.log('Modern clipboard API not available');
+            }
+            
+            // Fallback: copy text only using older API
+            if (text && text.trim()) {
+              console.log('Using fallback text copy method');
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                showCopyFeedback(hasImage ? 'Text copied! (Image copy not supported in this browser)' : 'Copied to clipboard!');
+              } else {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                textArea.style.top = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                  document.execCommand('copy');
+                  showCopyFeedback(hasImage ? 'Text copied! (Image copy not supported in this browser)' : 'Copied to clipboard!');
+                } catch (err) {
+                  console.error('Fallback copy failed:', err);
+                  showCopyFeedback('Copy failed');
+                }
+                document.body.removeChild(textArea);
+              }
+            } else if (hasImage) {
+              console.log('Only image present, but no modern clipboard support');
+              showCopyFeedback('Image copy not supported in this browser');
+            } else {
+              console.log('Nothing to copy');
+              showCopyFeedback('Nothing to copy');
+            }
+          } catch (err) {
+            console.error('Copy failed:', err);
+            showCopyFeedback('Copy failed');
+          }
+        } else if (action === 'delete') {
+          msg.remove();
+        } else if (action === 'edit') {
+          const newText = prompt('Edit message:', textElement.textContent);
+          if (newText !== null) textElement.textContent = sanitizeText(newText);
+        }
+      }
+
+      /*
+        Creates a blob from an image element using canvas to avoid CORS issues.
+        - Draws the image to a canvas and converts it to a blob.
+        - Handles cases where direct fetch might fail due to CORS restrictions.
+        - Connected to: The handleAction function for image copying.
+      */
+      async function createImageBlobFromElement(imageElement) {
+        return new Promise((resolve, reject) => {
+          console.log('Creating blob from image element:', imageElement.src);
+          
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // Set canvas size to match image
+          const imgWidth = imageElement.naturalWidth || imageElement.width || 800;
+          const imgHeight = imageElement.naturalHeight || imageElement.height || 600;
+          
+          console.log('Image dimensions:', imgWidth, 'x', imgHeight);
+          
+          canvas.width = imgWidth;
+          canvas.height = imgHeight;
+          
+          // Handle image load
+          const handleImageLoad = () => {
+            try {
+              console.log('Image loaded, drawing to canvas');
+              // Draw image to canvas
+              ctx.drawImage(imageElement, 0, 0, canvas.width, canvas.height);
+              
+              // Convert canvas to blob
+              canvas.toBlob((blob) => {
+                if (blob) {
+                  console.log('Canvas to blob successful:', blob.type, blob.size);
+                  resolve(blob);
+                } else {
+                  console.error('Failed to create blob from canvas');
+                  reject(new Error('Failed to create blob from canvas'));
+                }
+              }, 'image/png');
+            } catch (err) {
+              console.error('Error in handleImageLoad:', err);
+              reject(err);
+            }
+          };
+          
+          // Handle image error
+          const handleImageError = (error) => {
+            console.error('Image load error:', error);
+            reject(new Error('Failed to load image'));
+          };
+          
+          // If image is already loaded
+          if (imageElement.complete && imageElement.naturalWidth !== 0) {
+            console.log('Image already loaded');
+            handleImageLoad();
+          } else {
+            console.log('Waiting for image to load');
+            // Wait for image to load
+            imageElement.addEventListener('load', handleImageLoad, { once: true });
+            imageElement.addEventListener('error', handleImageError, { once: true });
+            
+            // Set a timeout in case the image never loads
+            setTimeout(() => {
+              console.error('Image load timeout');
+              reject(new Error('Image load timeout'));
+            }, 5000);
+          }
+        });
+      }
+
+      /*
+        Alternative method to copy image using selection and execCommand.
+        - Creates a temporary selection of the image and uses execCommand to copy.
+        - Works as a fallback when modern clipboard API fails.
+        - Connected to: The handleAction function for image copying fallback.
+      */
+      async function copyImageUsingSelection(imageElement) {
+        return new Promise((resolve, reject) => {
+          try {
+            console.log('Attempting to copy image using selection method');
+            
+            // Create a temporary container
+            const tempContainer = document.createElement('div');
+            tempContainer.style.position = 'fixed';
+            tempContainer.style.left = '-9999px';
+            tempContainer.style.top = '-9999px';
+            
+            // Clone the image
+            const clonedImage = imageElement.cloneNode(true);
+            tempContainer.appendChild(clonedImage);
+            document.body.appendChild(tempContainer);
+            
+            // Select the image
+            const range = document.createRange();
+            range.selectNode(clonedImage);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            
+            // Try to copy
+            const success = document.execCommand('copy');
+            
+            // Clean up
+            selection.removeAllRanges();
+            document.body.removeChild(tempContainer);
+            
+            if (success) {
+              console.log('Image copied using selection method');
+              resolve(true);
+            } else {
+              console.warn('Selection copy method failed');
+              reject(new Error('Selection copy method failed'));
+            }
+          } catch (err) {
+            console.error('Error in selection copy method:', err);
+            reject(err);
+          }
+        });
+      }
+
+      /*
+        Simple method to copy image using clipboard API with direct blob creation.
+        - Tries to create a blob directly from the image source.
+        - Works as another fallback method for image copying.
+        - Connected to: The handleAction function for image copying fallback.
+      */
+      async function copyImageSimple(imageElement) {
+        try {
+          console.log('Attempting simple image copy method');
+          
+          // Try to create blob directly from the image source
+          let blob;
+          if (imageElement.src.startsWith('data:')) {
+            // For data URLs, fetch and create blob
+            const response = await fetch(imageElement.src);
+            blob = await response.blob();
+          } else {
+            // For other URLs, try to create blob from canvas
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set reasonable canvas size
+            canvas.width = 800;
+            canvas.height = 600;
+            
+            // Create a new image to avoid CORS issues
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            return new Promise((resolve, reject) => {
+              img.onload = () => {
+                try {
+                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                  canvas.toBlob((blob) => {
+                    if (blob) {
+                      console.log('Simple method created blob:', blob.type, blob.size);
+                      resolve(blob);
+                    } else {
+                      reject(new Error('Failed to create blob'));
+                    }
+                  }, 'image/png');
+                } catch (err) {
+                  reject(err);
+                }
+              };
+              
+              img.onerror = () => {
+                reject(new Error('Failed to load image'));
+              };
+              
+              img.src = imageElement.src;
+            });
+          }
+          
+          if (blob) {
+            console.log('Simple method created blob:', blob.type, blob.size);
+            return blob;
+          }
+        } catch (err) {
+          console.error('Simple image copy method failed:', err);
+          throw err;
+        }
+      }
+
+      /*
+        Shows a temporary feedback message for copy operations.
+        - Creates a floating notification that appears briefly and fades out.
+        - Connected to: The handleAction function for copy feedback.
+      */
+      function showCopyFeedback(message) {
+        // Remove any existing feedback
+        const existingFeedback = document.querySelector('.copy-feedback');
+        if (existingFeedback) {
+          existingFeedback.remove();
+        }
+        
+        const feedback = document.createElement('div');
+        feedback.className = 'copy-feedback';
+        feedback.textContent = message;
+        feedback.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: var(--outgoing);
+          color: var(--text-outgoing);
+          padding: 10px 20px;
+          border-radius: 8px;
+          z-index: 1000;
+          font-size: 14px;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+          pointer-events: none;
+        `;
+        
+        document.body.appendChild(feedback);
+        
+        // Fade in
+        setTimeout(() => {
+          feedback.style.opacity = '1';
+        }, 10);
+        
+        // Fade out and remove
+        setTimeout(() => {
+          feedback.style.opacity = '0';
+          setTimeout(() => {
+            if (feedback.parentNode) {
+              feedback.parentNode.removeChild(feedback);
+            }
+          }, 300);
+        }, 2000);
+      }
+
+      /*
+        Toggles between light and dark themes by updating the data-theme attribute.
+        - Updates the theme button's aria-label for accessibility.
+        - Connected to: The theme button in the toolbar and the CSS theme variables.
+      */
+      themeBtn.addEventListener('click', () => {
+        const r = document.documentElement;
+        const isDark = r.getAttribute('data-theme') === 'dark';
+        r.setAttribute('data-theme', isDark ? '' : 'dark');
+        themeBtn.setAttribute('aria-label', isDark ? 'Enable Dark Mode' : 'Disable Dark Mode');
+      });
+
+      /*
+        Saves the chat conversation as a PDF using html2canvas and jsPDF.
+        - Captures the chat container as an image and adds it to a PDF document.
+        - Downloads the PDF as 'conversation.pdf'.
+        - Connected to: The save button in the toolbar and the jsPDF/html2canvas libraries.
+      */
+      saveBtn.addEventListener('click', () => {
+        html2canvas(chat, { scrollY: -window.scrollY }).then(canvas => {
+          const img = canvas.toDataURL('image/png');
+          const { jsPDF } = window.jspdf;
+          const pdf = new jsPDF('p', 'pt', 'a4');
+          const pdfW = pdf.internal.pageSize.getWidth();
+          const pdfH = (canvas.height * pdfW) / canvas.width;
+          pdf.addImage(img, 'PNG', 0, 0, pdfW, pdfH);
+          pdf.save('conversation.pdf');
+        }).catch(err => console.error('PDF save failed:', err));
+      });
+
+      /*
+        Reloads the page when the reload button is clicked.
+        - Provides a manual way to refresh the page and clear all state.
+        - Connected to: The reload button in the toolbar.
+      */
+      reloadBtn.addEventListener('click', () => {
+        if (confirm('Are you sure you want to reload the page? This will clear the current conversation.')) {
+          window.location.reload();
+        }
+      });
+
+      /*
+        Handles keyboard shortcuts for common actions.
+        - Ctrl+R: Reload page (with confirmation)
+        - Ctrl+S: Save conversation
+        - Connected to: Document keyboard events and toolbar buttons.
+      */
+      document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key === 'r') {
+          e.preventDefault();
+          if (confirm('Are you sure you want to reload the page? This will clear the current conversation.')) {
+            window.location.reload();
+          }
+        } else if (e.ctrlKey && e.key === 's') {
+          e.preventDefault();
+          saveBtn.click();
+        }
+      });
+
+      /*
+        Toggles between the chat page and model management page.
+        - Hides or shows the chat-page and model-page divs.
+        - Fetches models when switching to the model page.
+        - Updates the button's aria-label for accessibility.
+        - Connected to: The model-page button in the toolbar, chat-page, model-page, and fetchAndDisplayModels function.
+      */
+      btnModelPage.addEventListener('click', () => {
+        const isChatVisible = chatPage.style.display !== 'none';
+        chatPage.style.display = isChatVisible ? 'none' : 'flex';
+        modelPage.style.display = isChatVisible ? 'block' : 'none';
+        if (isChatVisible) {
+          fetchAndDisplayModels();
+          // Also load and display current default model
+          const savedDefaultModel = localStorage.getItem('defaultModel');
+          if (savedDefaultModel) {
+            updateCurrentDefaultModelDisplay(savedDefaultModel);
+          }
+        }
+        btnModelPage.setAttribute('aria-label', isChatVisible ? 'Return to Chat' : 'Model Management');
+      });
+
+      /*
+        Fetches and displays local Ollama models in the model page.
+        - Sends a GET request to the Ollama API to retrieve model details.
+        - Displays model information (name, size, modified date, digest) in a list.
+        - Adds delete buttons to each model and updates the model dropdown.
+        - Handles errors, including CORS issues, and displays status messages.
+        - Connected to: The model-page, fetchModelsButton, and populateModelDropdownAndDatalist function.
+      */
+      async function fetchAndDisplayModels() {
+        modelListUl.innerHTML = '';
+        statusMessage.textContent = 'Fetching models from Ollama server...';
+        fetchModelsButton.disabled = true;
+        
+        try {
+          console.log('Fetching models from:', `${OLLAMA_API_BASE_URL}/tags`);
+          
+          const response = await fetch(`${OLLAMA_API_BASE_URL}/tags`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (!response.ok) {
+            if (response.status === 0) {
+              throw new Error('Network error or CORS issue. Please ensure Ollama is running and OLLAMA_ORIGINS is set correctly (e.g., OLLAMA_ORIGINS="*" ollama serve).');
+            }
+            const errorText = await response.text();
+            throw new Error(`HTTP error! Status: ${response.status} - ${errorText}`);
+          }
+          
+          const data = await response.json();
+          console.log('Received models data:', data);
+          
+          statusMessage.textContent = '';
+          const localModels = [];
+          
+          if (data.models && data.models.length > 0) {
+            console.log(`Found ${data.models.length} models`);
+            statusMessage.textContent = `Found ${data.models.length} model(s) on your device`;
+            
+            data.models.forEach((model, index) => {
+              const modelName = model.name;
+              localModels.push(modelName);
+              
+              const listItem = document.createElement('li');
+              listItem.innerHTML = `
+                <div class="model-info">
+                  <strong>Name:</strong> ${sanitizeText(modelName)}<br/>
+                  <strong>Size:</strong> ${(model.size / (1024 * 1024 * 1024)).toFixed(2)} GB<br/>
+                  <strong>Modified:</strong> ${new Date(model.modified_at).toLocaleString()}<br/>
+                  <strong>Digest:</strong> ${sanitizeText(model.digest.substring(0, 15))}...
+                </div>
+                <button class="delete-button" data-model-id="${sanitizeText(modelName)}" aria-label="Delete Model ${sanitizeText(modelName)}">Remove</button>
+              `;
+              modelListUl.appendChild(listItem);
+            });
+            
+            // Add event listeners to delete buttons
+            document.querySelectorAll('#model-page .delete-button').forEach(button => {
+              button.addEventListener('click', handleDeleteModel);
+            });
+            
+            // Update the model dropdown with all available models
+            populateModelDropdownAndDatalist(localModels);
+            
+            // Show current default model if it exists
+            const savedDefaultModel = localStorage.getItem('defaultModel');
+            if (savedDefaultModel) {
+              updateCurrentDefaultModelDisplay(savedDefaultModel);
+            }
+            
+            // Clear status message after a delay
+            setTimeout(() => {
+              if (statusMessage.textContent.includes('Found')) {
+                statusMessage.textContent = '';
+              }
+            }, 3000);
+            
+          } else {
+            console.log("No models found on the device");
+            statusMessage.textContent = 'No models found on your device. Use the "Pull New Model" section above to download models.';
+            modelListUl.innerHTML = '<li style="text-align: center; color: #888; font-style: italic;">No models found on your device</li>';
+            
+            // Clear the dropdown since no models are available
+            populateModelDropdownAndDatalist([]);
+          }
+          
+        } catch (error) {
+          console.error('Error fetching Ollama models:', error);
+          statusMessage.textContent = `Error: ${error.message}`;
+          modelListUl.innerHTML = '<li style="text-align: center; color: #dc3545; font-style: italic;">Failed to fetch models</li>';
+          
+          // Show helpful troubleshooting info
+          if (error.message.includes('CORS') || error.message.includes('Network error')) {
+            statusMessage.textContent += '<br><br><strong>Troubleshooting:</strong><br>1. Make sure Ollama is running<br>2. Set OLLAMA_ORIGINS="*" before starting Ollama<br>3. Check if Ollama is accessible at http://localhost:11434';
+          }
+        } finally {
+          fetchModelsButton.disabled = false;
+        }
+      }
+
+      /*
+        Pulls a new model from the Ollama API based on user input.
+        - Sends a POST request with the model name and streams progress updates.
+        - Updates the progress bar and status messages during the pull process.
+        - Refreshes the model list upon completion.
+        - Handles errors, including CORS issues.
+        - Connected to: The model-page, pullModelButton, and fetchAndDisplayModels function.
+      */
+      async function pullModel() {
+        const modelName = modelNameInput.value.trim();
+        if (!modelName) {
+          pullStatus.textContent = 'Please enter a model name.';
+          return;
+        }
+        pullStatus.textContent = `Pulling ${sanitizeText(modelName)}...`;
+        pullProgressFill.style.width = '0%';
+        pullProgressFill.textContent = '0%';
+        pullModelButton.disabled = true;
+        fetchModelsButton.disabled = true;
+        try {
+          const response = await fetch(`${OLLAMA_API_BASE_URL}/pull`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: modelName, stream: true })
+          });
+          if (!response.ok) {
+            if (response.status === 0) {
+              throw new Error('Network error or CORS issue. Ensure Ollama is running and OLLAMA_ORIGINS is set correctly.');
+            }
+            const errorText = await response.text();
+            throw new Error(`HTTP error! Status: ${response.status} - ${errorText}`);
+          }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let lastNewline = buffer.lastIndexOf('\n');
+            while (lastNewline !== -1) {
+              const line = buffer.substring(0, lastNewline).trim();
+              buffer = buffer.substring(lastNewline + 1);
+              if (line) {
+                try {
+                  const data = JSON.parse(line);
+                  if (data.status) pullStatus.textContent = `Status: ${sanitizeText(data.status)}`;
+                  if (data.total && data.completed) {
+                    const progress = (data.completed / data.total) * 100;
+                    pullProgressFill.style.width = `${progress.toFixed(2)}%`;
+                    pullProgressFill.textContent = `${progress.toFixed(0)}%`;
+                  }
+                } catch (err) {}
+              }
+              lastNewline = buffer.lastIndexOf('\n');
+            }
+          }
+          pullStatus.textContent = `Model '${sanitizeText(modelName)}' pulled successfully!`;
+          pullProgressFill.style.width = '100%';
+          pullProgressFill.textContent = '100%';
+          modelNameInput.value = '';
+          fetchAndDisplayModels();
+        } catch (error) {
+          console.error('Error pulling model:', error);
+          pullStatus.textContent = `Error: ${error.message}`;
+          pullProgressFill.style.width = '0%';
+          pullProgressFill.textContent = '0%';
+        } finally {
+          pullModelButton.disabled = false;
+          fetchModelsButton.disabled = false;
+        }
+      }
+
+      /*
+        Deletes a model from the Ollama server after user confirmation.
+        - Sends a DELETE request to the Ollama API with the model name.
+        - Updates the model list and displays status messages.
+        - Handles errors and refreshes the model list upon completion.
+        - Connected to: The model-page, delete buttons in the model list, and fetchAndDisplayModels function.
+      */
+      async function handleDeleteModel(event) {
+        const modelName = event.target.dataset.modelId;
+        if (!confirm(`Are you sure you want to delete model "${sanitizeText(modelName)}"?`)) return;
+        statusMessage.textContent = `Deleting ${sanitizeText(modelName)}...`;
+        try {
+          const response = await fetch(`${OLLAMA_API_BASE_URL}/delete`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: modelName })
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error! Status: ${response.status} - ${errorText}`);
+          }
+          statusMessage.textContent = `Model '${sanitizeText(modelName)}' deleted successfully.`;
+          fetchAndDisplayModels();
+        } catch (error) {
+          console.error('Error deleting model:', error);
+          statusMessage.textContent = `Error deleting model: ${error.message}`;
+        }
+      }
+
+      /*
+        Initializes event listeners for model management buttons.
+        - fetchModelsButton: Triggers fetchAndDisplayModels to list models.
+        - pullModelButton: Triggers pullModel to download a new model.
+        - Connected to: The model-page and the respective model management functions.
+      */
+      fetchModelsButton.addEventListener('click', fetchAndDisplayModels);
+      pullModelButton.addEventListener('click', pullModel);
+      setDefaultModelButton.addEventListener('click', setDefaultModel);
+
+      /*
+        Initializes the default model functionality on page load.
+        - Loads the saved default model from localStorage.
+        - Sets up the default model dropdown functionality.
+        - Connected to: The loadDefaultModel and setupDefaultModelDropdown functions.
+      */
+      loadDefaultModel();
+      setupDefaultModelDropdown();
+      fetchAndDisplayModels();
+
+      /*
+        Loads the default model from localStorage and sets it in the model input.
+        - Retrieves the saved default model and updates the main model input field.
+        - Displays the current default model in the model management page.
+        - Connected to: The modelInput field and currentDefaultModel display.
+      */
+      function loadDefaultModel() {
+        const savedDefaultModel = localStorage.getItem('defaultModel');
+        if (savedDefaultModel) {
+          modelInput.value = savedDefaultModel;
+          updateCurrentDefaultModelDisplay(savedDefaultModel);
+        }
+      }
+
+      /*
+        Updates the display showing the current default model.
+        - Shows the current default model in the model management page.
+        - Connected to: The currentDefaultModel element and loadDefaultModel function.
+      */
+      function updateCurrentDefaultModelDisplay(modelName) {
+        if (modelName) {
+          currentDefaultModel.innerHTML = `<strong>Current Default Model:</strong> ${sanitizeText(modelName)}`;
+          currentDefaultModel.style.display = 'block';
+        } else {
+          currentDefaultModel.style.display = 'none';
+        }
+      }
+
+      /*
+        Sets a model as the default and saves it to localStorage.
+        - Validates the model name and saves it to localStorage.
+        - Updates the main model input and displays success message.
+        - Connected to: The setDefaultModelButton and localStorage.
+      */
+      function setDefaultModel() {
+        const modelName = defaultModelInput.value.trim();
+        if (!modelName) {
+          defaultModelStatus.textContent = 'Please enter a model name.';
+          defaultModelStatus.style.color = '#dc3545';
+          return;
+        }
+
+        // Save to localStorage
+        localStorage.setItem('defaultModel', modelName);
+        
+        // Update main model input
+        modelInput.value = modelName;
+        
+        // Update display
+        updateCurrentDefaultModelDisplay(modelName);
+        
+        // Show success message
+        defaultModelStatus.textContent = `Default model set to: ${sanitizeText(modelName)}`;
+        defaultModelStatus.style.color = '#28a745';
+        
+        // Clear input
+        defaultModelInput.value = '';
+        
+        // Hide success message after 3 seconds
+        setTimeout(() => {
+          defaultModelStatus.textContent = '';
+        }, 3000);
+      }
+
+      /*
+        Populates the default model dropdown with available models.
+        - Creates dropdown options for the default model selection.
+        - Adds click listeners to update the default model input.
+        - Connected to: The defaultModelDropdown and fetchAndDisplayModels function.
+      */
+      function populateDefaultModelDropdown(models) {
+        defaultModelDropdown.innerHTML = '';
+        models.forEach(modelName => {
+          const item = document.createElement('div');
+          item.textContent = modelName;
+          item.className = 'model-option';
+          item.setAttribute('data-model', modelName);
+          item.addEventListener('click', () => {
+            defaultModelInput.value = modelName;
+            defaultModelDropdown.style.display = 'none';
+          });
+          defaultModelDropdown.appendChild(item);
+        });
+      }
+
+      /*
+        Handles dropdown functionality for the default model input.
+        - Shows/hides dropdown when clicking the arrow.
+        - Filters dropdown options based on input text.
+        - Connected to: The defaultModelInput and defaultModelDropdown.
+      */
+      function setupDefaultModelDropdown() {
+        // Handle dropdown arrow click
+        const defaultDropdownArrow = defaultModelInput.parentNode.querySelector('.dropdown-arrow');
+        defaultDropdownArrow.addEventListener('click', () => {
+          const isVisible = defaultModelDropdown.style.display === 'block';
+          defaultModelDropdown.style.display = isVisible ? 'none' : 'block';
+          if (!isVisible) {
+            defaultModelDropdown.querySelectorAll('.model-option').forEach(option => {
+              option.style.display = 'block';
+            });
+          }
+        });
+
+        // Handle input filtering
+        defaultModelInput.addEventListener('input', () => {
+          const searchText = defaultModelInput.value.toLowerCase();
+          let hasVisibleOptions = false;
+          defaultModelDropdown.querySelectorAll('.model-option').forEach(option => {
+            if (searchText === '' || option.textContent.toLowerCase().includes(searchText)) {
+              option.style.display = 'block';
+              hasVisibleOptions = true;
+            } else {
+              option.style.display = 'none';
+            }
+          });
+          defaultModelDropdown.style.display = searchText && hasVisibleOptions ? 'block' : 'none';
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', e => {
+          if (!defaultModelInput.parentNode.contains(e.target)) {
+            defaultModelDropdown.style.display = 'none';
+          }
+        });
+      }
+
+      /*
+        Cleans up resources (stops camera) when the page is unloaded.
+        - Ensures the camera stream is terminated to free up device resources.
+        - Connected to: The stopCamera function.
+      */
+      window.addEventListener('beforeunload', (e) => {
+        // Only clean up camera resources, don't prevent normal reloads
+        if (mediaStream) {
+          stopCamera();
+        }
+      });
+
+      /*
+        Alternative cleanup method for when beforeunload doesn't fire.
+        - Ensures camera resources are cleaned up in all scenarios.
+        - Connected to: The stopCamera function.
+      */
+      window.addEventListener('unload', () => {
+        if (mediaStream) {
+          stopCamera();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
